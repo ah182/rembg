@@ -18,8 +18,8 @@ async def process_image(file: UploadFile = File(...)):
     image_bytes = await file.read()
 
     # استخدام مكتبة rembg لإزالة الخلفية
-    processed_image_bytes = remove(image_bytes)
-
+    # New line specifying a smaller model
+    processed_image_bytes = remove(image_bytes, model_name="u2netp")
     # إرجاع الصورة الجديدة كاستجابة مباشرة
     # نستخدم StreamingResponse لإرسال بيانات الصورة (bytes) مباشرة
     return StreamingResponse(content=io.BytesIO(processed_image_bytes), media_type="image/png")
