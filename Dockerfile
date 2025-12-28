@@ -25,4 +25,4 @@ ENV NUMBA_CACHE_DIR=/tmp/numba_cache
 ENV NUMBA_DISABLE_JIT=1
 
 # تشغيل التطبيق
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port $PORT"]
