@@ -1,25 +1,60 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import StreamingResponse
-from rembg import remove
+import os
 import io
+from fastapi import FastAPI, UploadFile, File, Response
+from rembg import remove, new_session
+from PIL import Image, ImageEnhance
 
-# إنشاء تطبيق FastAPI
-app = FastAPI(title="Background Remover API")
+# -------------------------------
+# إعداد البيئة والكاش
+# -------------------------------
+os.environ["NUMBA_CACHE_DIR"] = "/tmp/numba_cache"
+os.makedirs("/tmp/numba_cache", exist_ok=True)
+os.environ["NUMBA_DISABLE_JIT"] = "1"  # تعطيل الـ JIT لتجنب RuntimeError
 
-# Endpoint بسيط للترحيب والتأكد من أن الخدمة تعمل
+# أماكن حفظ موديلات rembg
+os.environ["HF_HOME"] = "/app/.cache/huggingface"
+os.environ["U2NET_HOME"] = "/app/.u2net"
+os.makedirs("/app/.cache/huggingface", exist_ok=True)
+os.makedirs("/app/.u2net", exist_ok=True)
+
+# -------------------------------
+# تهيئة التطبيق والموديل
+# -------------------------------
+app = FastAPI(title="Enhanced Background Remover API 🚀")
+
+# تحميل الموديل مرة واحدة
+session = new_session("u2netp")
+
+# -------------------------------
+# Health check
+# -------------------------------
 @app.get("/")
-def read_root():
-    return {"status": "ok", "message": "API is running"}
+def health_check():
+    return {"status": "ok", "message": "Server running successfully 🚀"}
 
-# Endpoint الأساسي الذي يستقبل الصورة ويعالجها
-@app.post("/remove-background")
-async def process_image(file: UploadFile = File(...)):
-    # قراءة محتوى الصورة التي تم رفعها
-    image_bytes = await file.read()
+# -------------------------------
+# API endpoint: تحسين الصورة ثم إزالة الخلفية
+# -------------------------------
+@app.post("/api/remove")
+async def enhance_then_remove_bg(file: UploadFile = File(...)):
+    # قراءة الصورة
+    image_data = await file.read()
 
-    # استخدام مكتبة rembg لإزالة الخلفية
-    # New line specifying a smaller model
-    processed_image_bytes = remove(image_bytes)
-    # إرجاع الصورة الجديدة كاستجابة مباشرة
-    # نستخدم StreamingResponse لإرسال بيانات الصورة (bytes) مباشرة
-    return StreamingResponse(content=io.BytesIO(processed_image_bytes), media_type="image/png")
+    # فتح الصورة وتحسينها أولاً
+    img = Image.open(io.BytesIO(image_data)).convert("RGB")
+
+    # تحسينات تشبه الماسح الضوئي (قبل إزالة الخلفية)
+    img = ImageEnhance.Sharpness(img).enhance(2.0)      # وضوح أعلى
+    img = ImageEnhance.Contrast(img).enhance(1.4)       # تباين أقوى
+    img = ImageEnhance.Brightness(img).enhance(1.15)    # إضاءة محسّنة
+
+    # تحويل الصورة بعد التحسين إلى bytes
+    enhanced_bytes = io.BytesIO()
+    img.save(enhanced_bytes, format="PNG")
+    enhanced_bytes.seek(0)
+
+    # إزالة الخلفية من الصورة المحسنة
+    result = remove(enhanced_bytes.getvalue(), session=session)
+
+    # إرجاع الصورة الناتجة
+    return Response(content=result, media_type="image/png")
