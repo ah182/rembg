@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: rembg-api-service
-    env: python
-    plan: free # يمكنك تغييره لاحقًا إلى Starter للحصول على أداء أفضل
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
