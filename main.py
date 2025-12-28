@@ -4,57 +4,85 @@ from fastapi import FastAPI, UploadFile, File, Response
 from rembg import remove, new_session
 from PIL import Image, ImageEnhance
 
-# -------------------------------
-# إعداد البيئة والكاش
-# -------------------------------
-os.environ["NUMBA_CACHE_DIR"] = "/tmp/numba_cache"
-os.makedirs("/tmp/numba_cache", exist_ok=True)
-os.environ["NUMBA_DISABLE_JIT"] = "1"  # تعطيل الـ JIT لتجنب RuntimeError
+# ---------------------------------------------------------
+# 1. إعداد المسارات العالمية (للتوافق مع سيرفرات Render)
+# ---------------------------------------------------------
+# نستخدم /tmp لأنه المجلد الوحيد المضمون فيه صلاحيات الكتابة (Write Access)
+HOME_DIR = "/tmp"
 
-# أماكن حفظ موديلات rembg
-os.environ["HF_HOME"] = "/app/.cache/huggingface"
-os.environ["U2NET_HOME"] = "/app/.u2net"
-os.makedirs("/app/.cache/huggingface", exist_ok=True)
-os.makedirs("/app/.u2net", exist_ok=True)
+os.environ["NUMBA_CACHE_DIR"] = os.path.join(HOME_DIR, "numba_cache")
+os.environ["U2NET_HOME"] = os.path.join(HOME_DIR, ".u2net")
+os.environ["HF_HOME"] = os.path.join(HOME_DIR, ".cache/huggingface")
 
-# -------------------------------
-# تهيئة التطبيق والموديل
-# -------------------------------
-app = FastAPI(title="Enhanced Background Remover API 🚀")
+# إنشاء المجلدات إذا لم تكن موجودة
+os.makedirs(os.environ["NUMBA_CACHE_DIR"], exist_ok=True)
+os.makedirs(os.environ["U2NET_HOME"], exist_ok=True)
+os.makedirs(os.environ["HF_HOME"], exist_ok=True)
 
-# تحميل الموديل مرة واحدة
+# تعطيل الـ JIT لتفادي أخطاء التوافق مع إصدارات بايثون الجديدة ورامات Render المحدودة
+os.environ["NUMBA_DISABLE_JIT"] = "1"
+
+# ---------------------------------------------------------
+# 2. تهيئة التطبيق والموديل
+# ---------------------------------------------------------
+app = FastAPI(title="Medical Products BG Remover 🚀")
+
+# تحميل الموديل الخفيف u2netp (أفضل للرامات 512MB وسريع جداً لعلب الأدوية)
+print("Loading model...")
 session = new_session("u2netp")
+print("Model loaded successfully!")
 
-# -------------------------------
-# Health check
-# -------------------------------
+# ---------------------------------------------------------
+# 3. الروابط (Endpoints)
+# ---------------------------------------------------------
+
 @app.get("/")
 def health_check():
-    return {"status": "ok", "message": "Server running successfully 🚀"}
+    return {
+        "status": "online",
+        "model": "u2netp",
+        "environment": "Render.com",
+        "message": "API is ready for medical products processing!"
+    }
 
-# -------------------------------
-# API endpoint: تحسين الصورة ثم إزالة الخلفية
-# -------------------------------
 @app.post("/api/remove")
 async def enhance_then_remove_bg(file: UploadFile = File(...)):
-    # قراءة الصورة
+    # 1. قراءة البيانات المرفوعة
     image_data = await file.read()
 
-    # فتح الصورة وتحسينها أولاً
+    # 2. تحويل البيانات لصورة PIL ومعالجتها
     img = Image.open(io.BytesIO(image_data)).convert("RGB")
 
-    # تحسينات تشبه الماسح الضوئي (قبل إزالة الخلفية)
-    img = ImageEnhance.Sharpness(img).enhance(2.0)      # وضوح أعلى
-    img = ImageEnhance.Contrast(img).enhance(1.4)       # تباين أقوى
-    img = ImageEnhance.Brightness(img).enhance(1.15)    # إضاءة محسّنة
+    # --- تحسينات مخصصة لصور المنتجات الطبية والعلب ---
+    # زيادة الوضوح لتحديد حواف العلبة بدقة
+    img = ImageEnhance.Sharpness(img).enhance(2.0)
+    # زيادة التباين لفصل المنتج عن الخلفية (خاصة لو الخلفية فاتحة)
+    img = ImageEnhance.Contrast(img).enhance(1.4)
+    # تحسين بسيط في الإضاءة
+    img = ImageEnhance.Brightness(img).enhance(1.15)
 
-    # تحويل الصورة بعد التحسين إلى bytes
-    enhanced_bytes = io.BytesIO()
-    img.save(enhanced_bytes, format="PNG")
-    enhanced_bytes.seek(0)
+    # 3. تحويل الصورة المحسنة إلى Bytes لإرسالها لـ rembg
+    enhanced_io = io.BytesIO()
+    img.save(enhanced_io, format="PNG")
+    enhanced_bytes = enhanced_io.getvalue()
 
-    # إزالة الخلفية من الصورة المحسنة
-    result = remove(enhanced_bytes.getvalue(), session=session)
+    # 4. إزالة الخلفية باستخدام الموديل المحمل مسبقاً
+    # تم تفعيل alpha_matting لضمان نعومة الحواف حول علب الأدوية
+    result = remove(
+        enhanced_bytes, 
+        session=session,
+        alpha_matting=True,
+        alpha_matting_foreground_threshold=240,
+        alpha_matting_background_threshold=10,
+        alpha_matting_erode_size=10
+    )
 
-    # إرجاع الصورة الناتجة
+    # 5. إرجاع الصورة النهائية كـ Response مباشر
     return Response(content=result, media_type="image/png")
+
+# ---------------------------------------------------------
+# تشغيل التطبيق (محلياً للاختبار)
+# ---------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
